@@ -1,0 +1,627 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>RepoReady — GitHub Repository Health Checker</title>
+<meta name="description" content="Check any public GitHub repository for essential documentation files and get a readiness score out of 100." />
+<style>
+  :root {
+    --bg: #0d1117; --card: #161b22; --inset: #0d1117; --border: #30363d;
+    --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff; --accent-strong: #2f81f7;
+    --green: #3fb950; --red: #f85149; --yellow: #d29922;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { scroll-behavior: smooth; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.55; min-height: 100vh;
+  }
+  body::before {
+    content: ""; position: fixed; inset: 0; pointer-events: none;
+    background: radial-gradient(900px 460px at 50% -8%, rgba(47,129,247,.16), transparent 70%);
+  }
+  .container { position: relative; max-width: 880px; margin: 0 auto; padding: 20px 16px 56px; }
+
+  header { text-align: center; margin: 26px 0; }
+  .logo { font-size: 44px; line-height: 1; }
+  h1 { font-size: 2rem; letter-spacing: -0.02em; margin-top: 6px; }
+  h1 span { color: var(--accent); }
+  .tagline { color: var(--muted); margin-top: 4px; font-size: .98rem; }
+
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .card h2 { font-size: 1.05rem; margin-bottom: 14px; }
+
+  .scan-form { display: flex; gap: 10px; }
+  .scan-form input {
+    flex: 1; min-width: 0; background: var(--inset); border: 1px solid var(--border);
+    color: var(--text); padding: 12px 14px; border-radius: 8px; font-size: 1rem;
+  }
+  .scan-form input:focus { outline: 2px solid var(--accent-strong); outline-offset: -1px; }
+  .scan-form input::placeholder { color: #6e7681; }
+  button.primary {
+    background: var(--accent-strong); color: #fff; border: none; padding: 12px 20px;
+    border-radius: 8px; font-size: 1rem; font-weight: 600; cursor: pointer; white-space: nowrap;
+  }
+  button.primary:hover:not(:disabled) { background: #4c89e8; }
+  button.primary:disabled { opacity: .55; cursor: wait; }
+  button.secondary {
+    background: #21262d; color: var(--text); border: 1px solid var(--border);
+    padding: 10px 16px; border-radius: 8px; font-size: .92rem; font-weight: 600; cursor: pointer;
+  }
+  button.secondary:hover { background: #2d333b; }
+  .link-btn {
+    background: none; border: none; color: var(--accent); cursor: pointer;
+    font-size: .85rem; padding: 0; text-decoration: underline;
+  }
+  button:focus-visible, a:focus-visible, input:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .hint { color: var(--muted); font-size: .85rem; margin-top: 12px; }
+  .hint code, details code {
+    background: var(--inset); border: 1px solid var(--border);
+    padding: 1px 6px; border-radius: 5px; font-size: .82rem;
+  }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+  .error-box, .warning-box { border-radius: 8px; padding: 10px 14px; font-size: .92rem; }
+  .error-box { margin-top: 14px; background: rgba(248,81,73,.09); border: 1px solid rgba(248,81,73,.45); color: #ffa198; }
+  .warning-box { background: rgba(210,153,34,.09); border: 1px solid rgba(210,153,34,.45); color: #e3b341; }
+  #results .warning-box { margin: 0 0 16px; }
+  .hidden { display: none !important; }
+
+  .loading { display: flex; align-items: center; justify-content: center; gap: 10px; padding: 30px 0; color: var(--muted); }
+  .spinner {
+    width: 18px; height: 18px; flex: none; border: 2px solid var(--border);
+    border-top-color: var(--accent); border-radius: 50%; animation: spin .8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  #results .card { margin-bottom: 16px; }
+
+  .repo-card { display: flex; gap: 16px; align-items: flex-start; }
+  .avatar { width: 72px; height: 72px; border-radius: 50%; border: 1px solid var(--border); flex: none; }
+  .repo-name { font-size: 1.25rem; font-weight: 700; }
+  .repo-name a { color: var(--accent); text-decoration: none; }
+  .repo-name a:hover { text-decoration: underline; }
+  .repo-desc { color: var(--muted); margin-top: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip {
+    font-size: .78rem; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 3px 10px; background: var(--inset); white-space: nowrap;
+  }
+
+  .score-card { display: flex; align-items: center; gap: 24px; flex-wrap: wrap; }
+  .gauge-wrap { position: relative; width: 150px; height: 150px; flex: none; margin: 0 auto; }
+  .gauge-wrap svg circle { fill: none; stroke-width: 10; }
+  .gauge-bg { stroke: #21262d; }
+  .gauge-fg { stroke: var(--green); stroke-linecap: round; transition: stroke-dashoffset .9s ease, stroke .3s ease; }
+  .gauge-label {
+    position: absolute; inset: 0; display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+  }
+  .gauge-score { font-size: 2.1rem; font-weight: 800; line-height: 1.1; }
+  .gauge-sub { color: var(--muted); font-size: .72rem; }
+  .score-details { flex: 1; min-width: 220px; }
+  .grade { font-size: 1.15rem; font-weight: 700; margin-bottom: 4px; }
+  .score-summary { color: var(--muted); font-size: .92rem; }
+
+  .checklist { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  @media (max-width: 640px) { .checklist { grid-template-columns: 1fr; } }
+  .check-item {
+    display: flex; gap: 10px; align-items: flex-start;
+    background: var(--inset); border: 1px solid var(--border); border-radius: 8px; padding: 12px;
+  }
+  .check-icon { font-size: 1.05rem; line-height: 1.4; }
+  .check-name { font-weight: 600; font-size: .95rem; }
+  .weight-badge {
+    font-size: .7rem; font-weight: 500; color: var(--muted); border: 1px solid var(--border);
+    border-radius: 999px; padding: 1px 7px; margin-left: 4px; vertical-align: 1px;
+  }
+  .check-path {
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    font-size: .76rem; color: var(--green); word-break: break-all; margin-top: 2px;
+  }
+  .check-path.bad { color: var(--red); }
+  .check-path.warn { color: var(--yellow); }
+
+  .all-good { color: var(--green); font-weight: 600; }
+  .reco-item { display: flex; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--border); }
+  .reco-item:last-child { border-bottom: none; padding-bottom: 4px; }
+  .reco-num {
+    flex: none; width: 26px; height: 26px; border-radius: 50%; background: var(--accent-strong);
+    color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: .8rem; font-weight: 700; margin-top: 2px;
+  }
+  .reco-title { font-weight: 700; font-size: .95rem; }
+  .reco-pts { font-size: .75rem; color: var(--muted); font-weight: 500; margin-left: 4px; }
+  .reco-text { color: var(--muted); font-size: .9rem; margin: 3px 0 5px; }
+  .reco-link { color: var(--accent); font-size: .82rem; text-decoration: none; }
+  .reco-link:hover { text-decoration: underline; }
+
+  .report-actions { text-align: center; margin: 4px 0 8px; }
+
+  details.how { margin-top: 20px; }
+  details.how summary { cursor: pointer; font-weight: 600; color: var(--accent); }
+  details.how ul { margin: 12px 0 8px 22px; color: var(--muted); font-size: .9rem; }
+  details.how li { margin: 3px 0; }
+  details.how p { color: var(--muted); font-size: .88rem; margin-top: 8px; }
+
+  footer { margin-top: 34px; text-align: center; color: var(--muted); font-size: .82rem; }
+  footer p { margin: 3px 0; }
+
+  .toast {
+    position: fixed; left: 50%; bottom: 26px; transform: translate(-50%, 16px);
+    background: #238636; color: #fff; padding: 10px 18px; border-radius: 8px;
+    font-size: .9rem; font-weight: 600; opacity: 0; pointer-events: none;
+    transition: opacity .25s ease, transform .25s ease;
+    box-shadow: 0 8px 24px rgba(0,0,0,.45); z-index: 50;
+  }
+  .toast.show { opacity: 1; transform: translate(-50%, 0); }
+  .toast.error { background: #b62324; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <div class="logo">🩺</div>
+    <h1>Repo<span>Ready</span></h1>
+    <p class="tagline">GitHub Repository Health Checker — is your repo ready for collaboration?</p>
+  </header>
+
+  <section class="card">
+    <form id="scanForm" class="scan-form" novalidate>
+      <input id="repoInput" type="text" placeholder="https://github.com/owner/repo"
+             autocomplete="off" spellcheck="false" aria-label="GitHub repository URL" />
+      <button type="submit" class="primary" id="scanBtn">Check Repository</button>
+    </form>
+    <p class="hint">Enter any <strong>public</strong> GitHub repository. Accepted formats:
+      <code>owner/repo</code>, <code>github.com/owner/repo</code>, or a full URL.</p>
+    <p class="hint">
+      Try an example:
+      <button type="button" class="link-btn" data-repo="octocat/Hello-World">octocat/Hello-World</button> ·
+      <button type="button" class="link-btn" data-repo="github/docs">github/docs</button>
+    </p>
+    <div id="errorBox" class="error-box hidden" role="alert"></div>
+  </section>
+
+  <div id="loading" class="loading hidden">
+    <span class="spinner"></span><span id="loadingText">Scanning…</span>
+  </div>
+
+  <section id="results" class="hidden">
+    <div id="warningBanner" class="warning-box hidden"></div>
+    <div class="card repo-card" id="repoCard"></div>
+
+    <div class="card score-card">
+      <div class="gauge-wrap" aria-hidden="true">
+        <svg viewBox="0 0 120 120" width="150" height="150">
+          <circle class="gauge-bg" cx="60" cy="60" r="52"></circle>
+          <circle class="gauge-fg" id="gaugeFg" cx="60" cy="60" r="52" transform="rotate(-90 60 60)"></circle>
+        </svg>
+        <div class="gauge-label">
+          <div class="gauge-score" id="gaugeScore">—</div>
+          <div class="gauge-sub">out of 100</div>
+        </div>
+      </div>
+      <div class="score-details">
+        <div class="grade" id="gradeLabel"></div>
+        <p class="score-summary" id="scoreSummary"></p>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>File checklist</h2>
+      <div class="checklist" id="checklist"></div>
+    </div>
+
+    <div class="card">
+      <h2>Recommendations</h2>
+      <div id="recommendations"></div>
+    </div>
+
+    <div class="report-actions">
+      <button class="secondary" id="copyBtn">📋 Copy summary report</button>
+    </div>
+  </section>
+
+  <details class="card how">
+    <summary>How the score works</summary>
+    <ul id="weightsList"></ul>
+    <p>The score reflects <strong>documentation and repository-setup readiness only</strong>. It is not an
+    official GitHub score and does not measure code quality, documentation correctness, or security.</p>
+  </details>
+
+  <footer>
+    <p>Data from the GitHub REST API · unauthenticated requests are limited to 60 per hour. <span id="rateInfo"></span></p>
+    <p>Built with HTML, CSS &amp; vanilla JavaScript · hosted on GitHub Pages · no backend, no tracking.</p>
+  </footer>
+</div>
+
+<div id="toast" class="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  /* ================= Configuration ================= */
+
+  const API_BASE = 'https://api.github.com';
+  const GAUGE_CIRC = 2 * Math.PI * 52;
+
+  // The eight checks and their weights (total = 100). Edit here to re-balance the score.
+  const CHECKS = [
+    {
+      id: 'readme', name: 'README', weight: 25, looksIn: 'root, docs/, .github/',
+      pattern: /^(docs\/|\.github\/)?readme(\.(md|markdown|rst|txt|html|adoc|org))?$/i,
+      recommendation: 'Add a README file at the repository root explaining what the project does, why it exists, how to install it, and how to use it. It is usually the first thing visitors see.',
+      doc: 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes'
+    },
+    {
+      id: 'license', name: 'LICENSE', weight: 20, looksIn: 'root, docs/',
+      pattern: /^(docs\/)?(license|licence|unlicense|copying|copyright|legal)(\.(md|markdown|rst|txt|html|adoc|org))?$/i,
+      recommendation: 'Add a LICENSE file so others know how they may use, modify, and share your code. Popular choices are MIT and Apache-2.0. GitHub can add one for you: create a new file named LICENSE and click "Choose a license template".',
+      doc: 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
+    },
+    {
+      id: 'gitignore', name: '.gitignore', weight: 15, looksIn: 'root',
+      pattern: /^\.gitignore$/i,
+      recommendation: 'Add a .gitignore file so build output, dependencies, and local environment files stay out of version control. Starter templates for many languages are available in the github/gitignore repository.',
+      doc: 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files'
+    },
+    {
+      id: 'contributing', name: 'CONTRIBUTING', weight: 10, looksIn: 'root, docs/, .github/',
+      pattern: /^(docs\/|\.github\/)?contributing(\.(md|markdown|rst|txt|html|adoc|org))?$/i,
+      recommendation: 'Add a CONTRIBUTING guide explaining how others can report issues and submit pull requests, including coding standards, branch/commit conventions, and the review process.',
+      doc: 'https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/setting-guidelines-for-repository-contributors'
+    },
+    {
+      id: 'code_of_conduct', name: 'CODE_OF_CONDUCT', weight: 10, looksIn: 'root, docs/, .github/',
+      pattern: /^(docs\/|\.github\/)?code_of_conduct(\.(md|markdown|rst|txt|html|adoc|org))?$/i,
+      recommendation: 'Add a CODE_OF_CONDUCT file to set expectations for behaviour and help make your community welcoming. GitHub offers a starter template you can add in a couple of clicks.',
+      doc: 'https://docs.github.com/en/communities/setting-up-your-project-for-healthy-contributions/adding-a-code-of-conduct-to-your-project'
+    },
+    {
+      id: 'security', name: 'SECURITY', weight: 10, looksIn: 'root, docs/, .github/',
+      pattern: /^(docs\/|\.github\/)?security(\.(md|markdown|rst|txt|html|adoc|org))?$/i,
+      recommendation: 'Add a SECURITY policy describing how vulnerabilities should be reported responsibly — for example through private security advisories or a dedicated contact email — instead of public issues.',
+      doc: 'https://docs.github.com/en/code-security/getting-started/adding-a-security-policy-to-your-repository'
+    },
+    {
+      id: 'issue_templates', name: 'Issue templates', weight: 5, looksIn: '.github/ISSUE_TEMPLATE/',
+      pattern: /^\.github\/issue_template(\/.+|(\.(md|yml|yaml)))?$/i,
+      recommendation: 'Add issue templates in .github/ISSUE_TEMPLATE/ (for example bug_report.md and feature_request.md) so reports include the details you need to reproduce and fix problems.',
+      doc: 'https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/configuring-issue-templates-for-your-repository'
+    },
+    {
+      id: 'pr_template', name: 'Pull request template', weight: 5, looksIn: 'root, docs/, .github/',
+      pattern: /^(\.github\/|docs\/)?pull_request_template(\/.+|(\.(md|txt)))?$/i,
+      recommendation: 'Add a pull request template (.github/PULL_REQUEST_TEMPLATE.md) so pull requests include a short description, linked issues, and notes on how the change was tested.',
+      doc: 'https://docs.github.com/en/communities/using-templates-to-encourage-useful-issues-and-pull-requests/creating-a-pull-request-template-for-your-repository'
+    }
+  ];
+
+  /* ================= DOM helpers ================= */
+
+  const $ = (id) => document.getElementById(id);
+  const scanForm = $('scanForm'), repoInput = $('repoInput'), scanBtn = $('scanBtn'),
+        errorBox = $('errorBox'), loading = $('loading'), loadingText = $('loadingText'),
+        results = $('results'), warningBanner = $('warningBanner'), repoCard = $('repoCard'),
+        gaugeFg = $('gaugeFg'), gaugeScore = $('gaugeScore'), gradeLabel = $('gradeLabel'),
+        scoreSummary = $('scoreSummary'), checklistEl = $('checklist'),
+        recommendationsEl = $('recommendations'), copyBtn = $('copyBtn'),
+        rateInfo = $('rateInfo'), toastEl = $('toast'), weightsList = $('weightsList');
+
+  weightsList.innerHTML = CHECKS
+    .map(c => `<li><code>${c.name}</code> — ${c.weight} point${c.weight === 1 ? '' : 's'}</li>`)
+    .join('') + '<li>Total — 100 points</li>';
+
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+    ));
+  }
+
+  /* ================= Module 1: Repository URL validation ================= */
+
+  function parseRepoUrl(raw) {
+    let input = (raw || '').trim();
+    if (!input) {
+      return { error: 'Please enter a GitHub repository URL, for example https://github.com/owner/repo' };
+    }
+    input = input
+      .replace(/^https?:\/\//i, '')
+      .replace(/^git@github\.com:/i, '')
+      .replace(/^www\.github\.com/i, 'github.com')
+      .split(/[?#]/)[0]
+      .replace(/\/+$/, '')
+      .replace(/\.git$/i, '');
+
+    const m = input.match(/^(?:github\.com\/)?([A-Za-z0-9][A-Za-z0-9-]*)\/([A-Za-z0-9._-]+)(?:\/.*)?$/);
+    if (!m) {
+      return { error: 'That does not look like a GitHub repository. Try "owner/repo" or "https://github.com/owner/repo".' };
+    }
+    return { owner: m[1], repo: m[2] };
+  }
+
+  /* ================= Module 2: Repository information retrieval ================= */
+
+  let rateRemaining = null;
+
+  async function ghFetch(path) {
+    let res;
+    try {
+      res = await fetch(API_BASE + path, {
+        headers: { 'Accept': 'application/vnd.github+json', 'X-GitHub-Api-Version': '2022-11-28' }
+      });
+    } catch (e) {
+      throw new Error('Network error: could not reach the GitHub API. Check your connection and try again.');
+    }
+    const remaining = res.headers.get('x-ratelimit-remaining');
+    if (remaining !== null) rateRemaining = remaining;
+
+    if (res.ok) return res.json();
+    if (res.status === 404) {
+      throw new Error('Repository not found. Make sure it is public and the URL is correct (private repositories cannot be scanned).');
+    }
+    if (res.status === 403 || res.status === 429) {
+      const reset = res.headers.get('x-ratelimit-reset');
+      let suffix = '';
+      if (reset) {
+        const mins = Math.max(1, Math.ceil((Number(reset) * 1000 - Date.now()) / 60000));
+        suffix = ` The limit resets in about ${mins} minute${mins === 1 ? '' : 's'}.`;
+      }
+      throw new Error('GitHub API rate limit reached — unauthenticated requests are limited to 60 per hour.' + suffix);
+    }
+    throw new Error('GitHub API error (HTTP ' + res.status + '). Please try again later.');
+  }
+
+  /* ================= Module 3: File detection + Module 4: Score calculation ================= */
+
+  function analyze(paths, treeError) {
+    let score = 0;
+    const results = CHECKS.map(check => {
+      if (treeError) return { check, state: 'unknown', found: null };
+      const candidates = paths.filter(p => check.pattern.test(p));
+      candidates.sort((a, b) => a.split('/').length - b.split('/').length); // prefer root-level files
+      const found = candidates.length ? candidates[0] : null;
+      if (found) score += check.weight;
+      return { check, state: found ? 'found' : 'missing', found };
+    });
+    const passed = results.filter(r => r.state === 'found').length;
+    return { score: treeError ? null : score, results, passed };
+  }
+
+  function gradeFor(score) {
+    if (score === null) return { label: 'Could not verify', color: 'var(--yellow)' };
+    if (score >= 90) return { label: 'Excellent', color: 'var(--green)' };
+    if (score >= 75) return { label: 'Good', color: 'var(--green)' };
+    if (score >= 50) return { label: 'Needs work', color: 'var(--yellow)' };
+    return { label: 'Poor', color: 'var(--red)' };
+  }
+
+  /* ================= Modules 5 & 6: Recommendations, results and report ================= */
+
+  function renderResults(meta, analysis, truncated, treeError) {
+    results.classList.remove('hidden');
+
+    let warn = '';
+    if (truncated) {
+      warn = '⚠️ GitHub returned an incomplete file tree for this very large repository, so some checks may be inaccurate.';
+    } else if (treeError) {
+      warn = '⚠️ The repository file tree could not be loaded (the repository may be empty). File checks are marked "could not verify".';
+    }
+    warningBanner.textContent = warn;
+    warningBanner.classList.toggle('hidden', !warn);
+
+    repoCard.innerHTML = `
+      <img class="avatar" src="${esc(meta.owner && meta.owner.avatar_url)}" alt="Owner avatar">
+      <div>
+        <div class="repo-name"><a href="${esc(meta.html_url)}" target="_blank" rel="noopener noreferrer">${esc(meta.full_name)}</a></div>
+        <p class="repo-desc">${meta.description ? esc(meta.description) : '<em>No description set.</em>'}</p>
+        <div class="chips">
+          ${meta.language ? `<span class="chip">💻 ${esc(meta.language)}</span>` : ''}
+          <span class="chip">⭐ ${Number(meta.stargazers_count || 0).toLocaleString()} stars</span>
+          <span class="chip">🍴 ${Number(meta.forks_count || 0).toLocaleString()} forks</span>
+          <span class="chip">🐛 ${Number(meta.open_issues_count || 0).toLocaleString()} open issues</span>
+          <span class="chip">📄 ${meta.license ? esc(meta.license.spdx_id || meta.license.name) : 'No license detected'}</span>
+          <span class="chip">🕒 Pushed ${esc(new Date(meta.pushed_at || meta.updated_at).toLocaleDateString())}</span>
+        </div>
+      </div>`;
+
+    const grade = gradeFor(analysis.score);
+    gaugeFg.style.strokeDasharray = GAUGE_CIRC.toFixed(2);
+    gaugeFg.style.strokeDashoffset = GAUGE_CIRC.toFixed(2);
+    gaugeFg.style.stroke = grade.color;
+
+    if (analysis.score === null) {
+      gaugeScore.textContent = '—';
+      gaugeScore.style.color = 'var(--text)';
+    } else {
+      gaugeScore.style.color = grade.color;
+      animateNumber(gaugeScore, analysis.score);
+      requestAnimationFrame(() => requestAnimationFrame(() => {
+        gaugeFg.style.strokeDashoffset = (GAUGE_CIRC * (1 - analysis.score / 100)).toFixed(2);
+      }));
+    }
+    gradeLabel.textContent = grade.label;
+    gradeLabel.style.color = grade.color;
+
+    scoreSummary.textContent = analysis.score === null
+      ? 'The file tree could not be read, so the checklist was not evaluated.'
+      : analysis.passed === CHECKS.length
+        ? `All ${CHECKS.length} checks passed — this repository is well prepared for collaboration!`
+        : `${analysis.passed} of ${CHECKS.length} checks passed · ${100 - analysis.score} points are still available.`;
+
+    checklistEl.innerHTML = analysis.results.map(({ check, state, found }) => {
+      const icon = state === 'found' ? '✅' : state === 'missing' ? '❌' : '⚠️';
+      const pathLine = state === 'found'
+        ? `<div class="check-path">${esc(found)}</div>`
+        : state === 'missing'
+          ? `<div class="check-path bad">Missing — looked in ${esc(check.looksIn)}</div>`
+          : `<div class="check-path warn">Could not verify</div>`;
+      return `
+        <div class="check-item" title="Looked in: ${esc(check.looksIn)}">
+          <div class="check-icon">${icon}</div>
+          <div>
+            <div class="check-name">${esc(check.name)}<span class="weight-badge">${check.weight} pts</span></div>
+            ${pathLine}
+          </div>
+        </div>`;
+    }).join('');
+
+    const notFound = analysis.results.filter(r => r.state !== 'found');
+    recommendationsEl.innerHTML = notFound.length
+      ? notFound.map((r, i) => `
+          <div class="reco-item">
+            <div class="reco-num">${i + 1}</div>
+            <div>
+              <div class="reco-title">${esc(r.check.name)}<span class="reco-pts">+${r.check.weight} pts available</span></div>
+              <p class="reco-text">${esc(r.check.recommendation)}</p>
+              <a class="reco-link" href="${esc(r.check.doc)}" target="_blank" rel="noopener noreferrer">GitHub guide →</a>
+            </div>
+          </div>`).join('')
+      : '<p class="all-good">🎉 Nothing missing — every check passed. Ship it!</p>';
+
+    results.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function animateNumber(el, target) {
+    const duration = 900, start = performance.now();
+    function frame(now) {
+      const t = Math.min(1, (now - start) / duration);
+      const eased = 1 - Math.pow(1 - t, 3);
+      el.textContent = String(Math.round(eased * target));
+      if (t < 1) requestAnimationFrame(frame);
+    }
+    requestAnimationFrame(frame);
+  }
+
+  function buildReport(meta, analysis, truncated) {
+    const L = [];
+    L.push('RepoReady — Repository Readiness Report');
+    L.push('----------------------------------------');
+    L.push('Repository : ' + meta.full_name);
+    L.push('URL        : ' + meta.html_url);
+    L.push('Description: ' + (meta.description || '(no description set)'));
+    L.push('Scanned on : ' + new Date().toLocaleString());
+    L.push('');
+    L.push('Readiness score: ' + (analysis.score === null ? 'N/A (file tree unavailable)' : analysis.score + '/100 — ' + gradeFor(analysis.score).label));
+    L.push('Checks passed  : ' + analysis.passed + ' of ' + CHECKS.length);
+    L.push('');
+    L.push('Checklist:');
+    analysis.results.forEach(({ check, state, found }) => {
+      const mark = state === 'found' ? '[x]' : state === 'unknown' ? '[?]' : '[ ]';
+      const detail = state === 'found' ? 'present (' + found + ')'
+                   : state === 'unknown' ? 'could not verify' : 'missing';
+      L.push('  ' + mark + ' ' + check.name.padEnd(22, ' ') + String(check.weight).padStart(2, ' ') + ' pts — ' + detail);
+    });
+    const missing = analysis.results.filter(r => r.state !== 'found');
+    if (missing.length) {
+      L.push('');
+      L.push('Recommendations:');
+      missing.forEach((r, i) => {
+        L.push('  ' + (i + 1) + '. ' + r.check.name + ': ' + r.check.recommendation);
+        L.push('     Guide: ' + r.check.doc);
+      });
+    } else {
+      L.push('');
+      L.push('All checks passed — great job!');
+    }
+    if (truncated) {
+      L.push('');
+      L.push('Note: GitHub returned an incomplete file tree, so some results may be inaccurate.');
+    }
+    L.push('');
+    L.push('This score reflects documentation and repository-setup readiness only. It is not a');
+    L.push('code-quality or security assessment.');
+    L.push('Generated by RepoReady.');
+    return L.join('\n');
+  }
+
+  async function copyReport() {
+    if (!currentReport) return;
+    try {
+      await navigator.clipboard.writeText(currentReport);
+      showToast('Report copied to clipboard ✅');
+    } catch (e) {
+      const ta = document.createElement('textarea');
+      ta.value = currentReport;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      const ok = document.execCommand && document.execCommand('copy');
+      document.body.removeChild(ta);
+      showToast(ok ? 'Report copied to clipboard ✅' : 'Copy failed — please copy manually', !ok);
+    }
+  }
+
+  let toastTimer = null, currentReport = '';
+  function showToast(msg, isError) {
+    toastEl.textContent = msg;
+    toastEl.classList.toggle('error', !!isError);
+    toastEl.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 2600);
+  }
+
+  /* ================= Orchestration (Methodology, steps 1–8) ================= */
+
+  async function runScan() {
+    hideError();
+    results.classList.add('hidden');
+
+    const parsed = parseRepoUrl(repoInput.value);
+    if (parsed.error) { showError(parsed.error); return; }
+    const { owner, repo } = parsed;
+
+    scanBtn.disabled = true;
+    scanBtn.textContent = 'Checking…';
+    loading.classList.remove('hidden');
+    loadingText.textContent = 'Scanning ' + owner + '/' + repo + ' — fetching repository information…';
+
+    try {
+      const meta = await ghFetch('/repos/' + owner + '/' + repo);
+      loadingText.textContent = 'Scanning ' + owner + '/' + repo + ' — reading file tree…';
+
+      let paths = [], truncated = false, treeError = null;
+      try {
+        const tree = await ghFetch('/repos/' + owner + '/' + repo + '/git/trees/' + (meta.default_branch || 'HEAD') + '?recursive=1');
+        truncated = !!tree.truncated;
+        paths = (tree.tree || []).filter(e => e.type === 'blob').map(e => e.path);
+      } catch (e) {
+        treeError = e;
+      }
+
+      const analysis = analyze(paths, treeError);
+      renderResults(meta, analysis, truncated, treeError);
+      currentReport = buildReport(meta, analysis, truncated);
+      rateInfo.textContent = rateRemaining !== null
+        ? '· ' + rateRemaining + ' API requests remaining this hour' : '';
+    } catch (e) {
+      showError(e.message);
+    } finally {
+      scanBtn.disabled = false;
+      scanBtn.textContent = 'Check Repository';
+      loading.classList.add('hidden');
+    }
+  }
+
+  function showError(msg) { errorBox.textContent = '⚠️ ' + msg; errorBox.classList.remove('hidden'); }
+  function hideError() { errorBox.classList.add('hidden'); }
+
+  /* ================= Events ================= */
+
+  scanForm.addEventListener('submit', (e) => { e.preventDefault(); runScan(); });
+  copyBtn.addEventListener('click', copyReport);
+  repoInput.addEventListener('input', hideError);
+
+  document.querySelectorAll('.link-btn[data-repo]').forEach(btn => {
+    btn.addEventListener('click', () => { repoInput.value = btn.dataset.repo; runScan(); });
+  });
+})();
+</script>
+</body>
+</html>
